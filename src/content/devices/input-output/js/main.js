@@ -13,10 +13,23 @@ const audioInputSelect = document.querySelector('select#audioSource');
 const audioOutputSelect = document.querySelector('select#audioOutput');
 const videoSelect = document.querySelector('select#videoSource');
 const selectors = [audioInputSelect, audioOutputSelect, videoSelect];
+let hasMic = false;
+let hasCamera = false;
+let openMic = undefined;
+let openCamera = undefined;
+let hasPermission = false;
 
 audioOutputSelect.disabled = !('sinkId' in HTMLMediaElement.prototype);
 
+function getDevices() {
+  navigator.mediaDevices.enumerateDevices().then(gotDevices).catch(handleError);
+}
+
 function gotDevices(deviceInfos) {
+  console.log('gotDevices', deviceInfos);
+  hasMic = false;
+  hasCamera = false;
+  hasPermission = false;
   // Handles being called several times to update labels. Preserve values.
   const values = selectors.map(select => select.value);
   selectors.forEach(select => {
@@ -26,15 +39,23 @@ function gotDevices(deviceInfos) {
   });
   for (let i = 0; i !== deviceInfos.length; ++i) {
     const deviceInfo = deviceInfos[i];
+    if (deviceInfo.deviceId == '') {
+      continue;
+    }
+    // If we get at least one deviceId, that means user has granted user
+    // media permissions.
+    hasPermission = true;
     const option = document.createElement('option');
     option.value = deviceInfo.deviceId;
     if (deviceInfo.kind === 'audioinput') {
+      hasMic = true;
       option.text = deviceInfo.label || `microphone ${audioInputSelect.length + 1}`;
       audioInputSelect.appendChild(option);
     } else if (deviceInfo.kind === 'audiooutput') {
       option.text = deviceInfo.label || `speaker ${audioOutputSelect.length + 1}`;
       audioOutputSelect.appendChild(option);
     } else if (deviceInfo.kind === 'videoinput') {
+      hasCamera = true;
       option.text = deviceInfo.label || `camera ${videoSelect.length + 1}`;
       videoSelect.appendChild(option);
     } else {
@@ -46,9 +67,8 @@ function gotDevices(deviceInfos) {
       select.value = values[selectorIndex];
     }
   });
+  start();
 }
-
-navigator.mediaDevices.enumerateDevices().then(gotDevices).catch(handleError);
 
 // Attach audio output device to video element using device/sink ID.
 function attachSinkId(element, sinkId) {
@@ -79,8 +99,14 @@ function changeAudioDestination() {
 function gotStream(stream) {
   window.stream = stream; // make stream available to console
   videoElement.srcObject = stream;
-  // Refresh button list in case labels have become available
-  return navigator.mediaDevices.enumerateDevices();
+  if (stream.getVideoTracks()[0]) {
+    openCamera = stream.getVideoTracks()[0].getSettings().deviceId;
+  }
+  if (stream.getAudioTracks()[0]) {
+    openMic = stream.getAudioTracks()[0].getSettings().deviceId;
+  }
+  // Refresh list in case labels have become available
+  return getDevices();
 }
 
 function handleError(error) {
@@ -88,23 +114,39 @@ function handleError(error) {
 }
 
 function start() {
+  const audioSource = audioInputSelect.value || undefined;
+  const videoSource = videoSelect.value || undefined;
+  // Don't open the same devices again.
+  if (hasPermission && openMic == audioSource && openCamera == videoSource) {
+    return;
+  }
+  // Close existng streams.
   if (window.stream) {
     window.stream.getTracks().forEach(track => {
       track.stop();
     });
+    openCamera = undefined;
+    openMic = undefined;
   }
-  const audioSource = audioInputSelect.value;
-  const videoSource = videoSelect.value;
   const constraints = {
-    audio: {deviceId: audioSource ? {exact: audioSource} : undefined},
-    video: {deviceId: videoSource ? {exact: videoSource} : undefined}
+    audio: true,
+    video: true
   };
-  navigator.mediaDevices.getUserMedia(constraints).then(gotStream).then(gotDevices).catch(handleError);
+  if (hasMic) {
+    constraints['audio'] = {deviceId: audioSource ? {exact: audioSource} : undefined};
+  }
+  if (hasCamera) {
+    constraints['video'] = {deviceId: videoSource ? {exact: videoSource} : undefined};
+  }
+  console.log('start', constraints);
+  if (!hasPermission || hasCamera || hasMic) {
+    navigator.mediaDevices.getUserMedia(constraints).then(gotStream).catch(handleError);
+  }
 }
 
 audioInputSelect.onchange = start;
 audioOutputSelect.onchange = changeAudioDestination;
-
 videoSelect.onchange = start;
+navigator.mediaDevices.ondevicechange = getDevices;
 
-start();
+getDevices();

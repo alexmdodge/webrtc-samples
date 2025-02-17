@@ -52,7 +52,7 @@ downloadButton.addEventListener('click', () => {
   const a = document.createElement('a');
   a.style.display = 'none';
   a.href = url;
-  a.download = mimeType === 'video/mp4' ? 'test.mp4' : 'test.webm';
+  a.download = `test.${mimeTypeToFileExtension(mimeType)}`;
   document.body.appendChild(a);
   a.click();
   setTimeout(() => {
@@ -60,6 +60,19 @@ downloadButton.addEventListener('click', () => {
     window.URL.revokeObjectURL(url);
   }, 100);
 });
+
+function mimeTypeToFileExtension(mimeType) {
+  switch (mimeType) {
+    case 'video/mp4':
+      return 'mp4';
+    case 'video/webm':
+      return 'webm';
+    case 'video/x-matroska':
+      return 'mkv';
+    default:
+      throw new Error(`unsupported mimetype: ${mimeType}`);
+  }
+}
 
 function handleDataAvailable(event) {
   console.log('handleDataAvailable', event);
@@ -74,8 +87,19 @@ function getSupportedMimeTypes() {
     'video/webm;codecs=vp8,opus',
     'video/webm;codecs=h264,opus',
     'video/webm;codecs=av01,opus',
-    'video/mp4;codecs=h264,aac',
-    'video/mp4;codecs=avc1,mp4a.40.2',
+    'video/x-matroska;codecs=hvc1.1.6.L186.B0,opus',
+    'video/mp4;codecs=vp9,mp4a.40.2',
+    'video/mp4;codecs=vp9,opus',
+    'video/mp4;codecs=avc1.64003E,mp4a.40.2',
+    'video/mp4;codecs=avc1.64003E,opus',
+    'video/mp4;codecs=avc3.64003E,mp4a.40.2',
+    'video/mp4;codecs=avc3.64003E,opus',
+    'video/mp4;codecs=hvc1.1.6.L186.B0,mp4a.40.2',
+    'video/mp4;codecs=hvc1.1.6.L186.B0,opus',
+    'video/mp4;codecs=hev1.1.6.L186.B0,mp4a.40.2',
+    'video/mp4;codecs=hev1.1.6.L186.B0,opus',
+    'video/mp4;codecs=av01.0.19M.08,mp4a.40.2',
+    'video/mp4;codecs=av01.0.19M.08,opus',
     'video/mp4',
   ];
   return possibleTypes.filter(mimeType => {
@@ -90,12 +114,14 @@ async function startRecording() {
   if (mimeType.split(';', 1)[0] === 'video/mp4') {
     // Adjust sampling rate to 48khz.
     const track = window.stream.getAudioTracks()[0];
-    const {sampleRate} = track.getSettings();
-    if (sampleRate != 48000) {
-      track.stop();
-      window.stream.removeTrack(track);
-      const newStream = await navigator.mediaDevices.getUserMedia({audio: {sampleRate: 48000}});
-      window.stream.addTrack(newStream.getTracks()[0]);
+    if (track) {
+      const {sampleRate} = track.getSettings();
+      if (sampleRate != 48000) {
+        track.stop();
+        window.stream.removeTrack(track);
+        const newStream = await navigator.mediaDevices.getUserMedia({audio: {sampleRate: 48000}});
+        window.stream.addTrack(newStream.getTracks()[0]);
+      }
     }
   }
   try {
@@ -126,7 +152,7 @@ function stopRecording() {
 
 function handleSuccess(stream) {
   recordButton.disabled = false;
-  console.log('getUserMedia() got stream:', stream);
+  console.log('Got stream:', stream);
   window.stream = stream;
 
   const gumVideo = document.querySelector('video#gum');
@@ -141,27 +167,37 @@ function handleSuccess(stream) {
   codecPreferences.disabled = false;
 }
 
-async function init(constraints) {
+async function init(constraints, isGetDisplayMedia) {
   try {
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const stream = isGetDisplayMedia ?
+        await navigator.mediaDevices.getDisplayMedia(constraints) :
+        await navigator.mediaDevices.getUserMedia(constraints);
     handleSuccess(stream);
   } catch (e) {
-    console.error('navigator.getUserMedia error:', e);
-    errorMsgElement.innerHTML = `navigator.getUserMedia error:${e.toString()}`;
+    console.error('Source open error:', e);
+    errorMsgElement.innerHTML = `Source error: ${e.toString()}`;
   }
 }
 
-document.querySelector('button#start').addEventListener('click', async () => {
-  document.querySelector('button#start').disabled = true;
+async function onStart(isGetDisplayMedia) {
+  document.querySelector('button#start-gum').disabled = true;
+  document.querySelector('button#start-gdm').disabled = true;
   const hasEchoCancellation = document.querySelector('#echoCancellation').checked;
   const constraints = {
     audio: {
-      echoCancellation: {exact: hasEchoCancellation}
+      echoCancellation: hasEchoCancellation
     },
     video: {
       width: 1280, height: 720
     }
   };
   console.log('Using media constraints:', constraints);
-  await init(constraints);
+  await init(constraints, isGetDisplayMedia);
+}
+
+document.querySelector('button#start-gum').addEventListener('click', async () => {
+  await onStart(false);
+});
+document.querySelector('button#start-gdm').addEventListener('click', async () => {
+  await onStart(true);
 });

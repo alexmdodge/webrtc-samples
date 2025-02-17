@@ -38,7 +38,7 @@ if (os.platform() === 'win32') {
 function mapVersion(browser, version) {
   const versionMap = {
     chrome: {
-      unstable: 'dev',
+      unstable: 'canary',
     },
     firefox: {
       unstable: 'nightly',
@@ -48,7 +48,7 @@ function mapVersion(browser, version) {
 }
 
 async function buildDriver(browser = process.env.BROWSER || 'chrome', options = {version: process.env.BVER}) {
-  const version = mapVersion(options.version);
+  const version = mapVersion(browser, options.version);
   const platform = puppeteerBrowsers.detectBrowserPlatform();
 
   const buildId = await download(browser, version || 'stable',
