@@ -1,7 +1,7 @@
 module.exports = {
   'extends': 'google',
   'parserOptions': {
-    'ecmaVersion': 2017,
+    'ecmaVersion': 2024,
     'sourceType': 'module',
   },
   'env': {
@@ -22,26 +22,26 @@ module.exports = {
     'eol-last': 'off',
     'no-undef': 2,
   },
-  "globals": {
-    "adapter": true,
-    "browserSupportsIPHandlingPolicy": true,
-    "browserSupportsNonProxiedUdpBoolean": true,
-    "chrome": true,
-    "ga": true,
-    "getPolicyFromBooleans": true,
-    "importScripts": true,
+  'globals': {
+    'adapter': true,
+    'browserSupportsIPHandlingPolicy': true,
+    'browserSupportsNonProxiedUdpBoolean': true,
+    'chrome': true,
+    'ga': true,
+    'getPolicyFromBooleans': true,
+    'importScripts': true,
     // From WebGPU specification
-    "GPUBufferUsage": true,
-    "GPUTextureUsage": true,
+    'GPUBufferUsage': true,
+    'GPUTextureUsage': true,
     // From Streams specification
-    "TransformStream": true,
+    'TransformStream': true,
     // From WebCodec specification
-    "AudioData": true,
-    "AudioEncoder": true,
-    "AudioDecoder": true,
-    "VideoFrame": true,
-    "VideoEncoder": true,
-    "VideoDecoder": true,
+    'AudioData': true,
+    'AudioEncoder': true,
+    'AudioDecoder': true,
+    'VideoFrame': true,
+    'VideoEncoder': true,
+    'VideoDecoder': true,
   },
-  "plugins": ["jest"]
+  'plugins': ['jest']
 };
