@@ -104,13 +104,7 @@ async function call() {
   localStream.getTracks().forEach(track => pc1.addTrack(track, localStream));
   console.log('Added local stream to pc1');
 
-  pc1.getSenders().forEach(sender => {
-    const outboundSender = sender;
-
-    if (outboundSender.track.kind === 'video') {
-      pollOutboundStats(outboundSender);
-    }
-  });
+  pollOutboundStats(pc1.getSenders());
 
   try {
     console.log('pc1 createOffer start');
@@ -168,13 +162,7 @@ function onSetSessionDescriptionError(error) {
 }
 
 function gotRemoteStream(e) {
-  pc2.getReceivers().forEach(receiver => {
-    const inboundReceiver = receiver;
-
-    if (inboundReceiver.track.kind === 'video') {
-      pollInboundStats(inboundReceiver);
-    }
-  });
+  pollInboundStats(pc2.getReceivers());
 
   if (remoteVideo.srcObject !== e.streams[0]) {
     remoteVideo.srcObject = e.streams[0];
@@ -250,6 +238,42 @@ function syntheticVideoStream({width = 1280, height = 720, signal} = {}) {
   const ctx = canvas.getContext('2d');
   const stream = canvas.captureStream();
 
+  // **Audio Context and Oscillator Setup**
+  const audioCtx = new AudioContext();
+  const oscillator = audioCtx.createOscillator();
+  const gainNode = audioCtx.createGain(); // Use a gain node to control volume
+
+  oscillator.type = 'sine'; // You can change the waveform type
+  oscillator.frequency.value = 220; // Base frequency
+
+  // Connect oscillator to gain node, and gain node to audio context destination
+  oscillator.connect(gainNode);
+  gainNode.connect(audioCtx.destination);
+
+  // Start the oscillator
+  oscillator.start();
+
+  // Vibrato effect (pitch oscillation) using a modulator oscillator
+  const modulator = audioCtx.createOscillator();
+  const modulatorGain = audioCtx.createGain();
+
+  modulator.frequency.value = 5; // Oscillation speed (Hz)
+  modulatorGain.gain.value = 10; // Oscillation depth (in Hz)
+
+  modulator.connect(modulatorGain);
+  modulatorGain.connect(oscillator.frequency); // Connect to oscillator's frequency
+
+  modulator.start();
+
+  // Create a MediaStreamAudioDestinationNode
+  const destination = audioCtx.createMediaStreamDestination();
+  gainNode.connect(destination); // Connect gain node to the destination
+
+  const audioStream = destination.stream; // Get the audio stream
+
+  // Combine the video and audio streams
+  const combinedStream = new MediaStream([...stream.getVideoTracks(), ...audioStream.getAudioTracks()]);
+
   let count = 0;
   setInterval(() => {
     // Use relatively-prime multipliers to get a color roll
@@ -280,5 +304,6 @@ function syntheticVideoStream({width = 1280, height = 720, signal} = {}) {
       ctx.fillRect(20, 20, 40, 40);
     }
   }, 10);
-  return stream;
+
+  return combinedStream;
 }

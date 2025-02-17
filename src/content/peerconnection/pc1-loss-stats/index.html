@@ -47,15 +47,25 @@
     </div>
 
     <div class="graph-flex">
-        <div class="graph-container" id="remote-inbound-loss">
+        <div class="graph-container" id="remote-inbound-video-loss">
             <div>RTCRemoteInboundRtpStreamStats (kind=video)<small><code>fractionLost</code></small></div>
             <canvas id="remote-inbound-video-loss-canvas"></canvas>
             <div id="remote-inbound-video-loss-minmax"></div>
         </div>
-        <div class="graph-container" id="inbound-loss">
+        <div class="graph-container" id="inbound-video-loss">
             <div>RTCReceivedRtpStreamStats (kind=video)<small><code>packetsLost / (packetsLost + packetsReceived)</code></small></div>
             <canvas id="inbound-video-loss-canvas"></canvas>
             <div id="inbound-video-loss-minmax"></div>
+        </div>
+        <div class="graph-container" id="remote-inbound-audio-loss">
+            <div>RTCRemoteInboundRtpStreamStats (kind=audio)<small><code>fractionLost</code></small></div>
+            <canvas id="remote-inbound-audio-loss-canvas"></canvas>
+            <div id="remote-inbound-audio-loss-minmax"></div>
+        </div>
+        <div class="graph-container" id="inbound-audio-loss">
+            <div>RTCReceivedRtpStreamStats (kind=audio)<small><code>packetsLost / (packetsLost + packetsReceived)</code></small></div>
+            <canvas id="inbound-audio-loss-canvas"></canvas>
+            <div id="inbound-audio-loss-minmax"></div>
         </div>
     </div>
 </div>

@@ -11,11 +11,24 @@ let inboundVideoLossSeriesNoRid;
 let inboundVideoLossGraph;
 let inboundVideoLossSamples = [];
 
+let remoteInboundAudioLossSeriesNoRid;
+let remoteInboundAudioLossGraph;
+let remoteInboundAudioLossSamples = [];
+
+let inboundAudioLossSeriesNoRid;
+let inboundAudioLossGraph;
+let inboundAudioLossSamples = [];
+
 function setupOutboundStatsGraphs() {
   remoteInboundVideoLossSamples = [];
   remoteInboundVideoLossSeriesNoRid = new TimelineDataSeries();
   remoteInboundVideoLossGraph = new TimelineGraphView('remote-inbound-video-loss', 'remote-inbound-video-loss-canvas');
   remoteInboundVideoLossGraph.updateEndDate();
+
+  remoteInboundAudioLossSamples = [];
+  remoteInboundAudioLossSeriesNoRid = new TimelineDataSeries();
+  remoteInboundAudioLossGraph = new TimelineGraphView('remote-inbound-audio-loss', 'remote-inbound-audio-loss-canvas');
+  remoteInboundAudioLossGraph.updateEndDate();
 }
 
 function setupInboundStatsGraphs() {
@@ -23,6 +36,11 @@ function setupInboundStatsGraphs() {
   inboundVideoLossSeriesNoRid = new TimelineDataSeries();
   inboundVideoLossGraph = new TimelineGraphView('inbound-video-loss', 'inbound-video-loss-canvas');
   inboundVideoLossGraph.updateEndDate();
+
+  inboundAudioLossSamples = [];
+  inboundAudioLossSeriesNoRid = new TimelineDataSeries();
+  inboundAudioLossGraph = new TimelineGraphView('inbound-audio-loss', 'inbound-audio-loss-canvas');
+  inboundAudioLossGraph.updateEndDate();
 }
 
 export function clearStatsPolling() {
@@ -32,27 +50,51 @@ export function clearStatsPolling() {
   inboundReportsTimerId = undefined;
 }
 
-export function pollOutboundStats(sender, interval = 1000) {
+async function convertReportsToArray(statsReporter) {
+  const rtcReports = await statsReporter.getStats();
+  const reports = Array.from(rtcReports.values());
+  return reports;
+}
+
+/**
+ * @param {RTCRtpSender[]} senders
+ * @param {number} interval
+ */
+export function pollOutboundStats(senders, interval = 1000) {
   if (outboundReportsTimerId) return;
   setupOutboundStatsGraphs();
 
+  const videoSender = senders.find(sender => sender.track.kind === 'video');
+  const audioSender = senders.find(sender => sender.track.kind === 'audio');
+
   outboundReportsTimerId = setInterval(async () => {
-    const outbound = await sampleOutboundVideoStats(sender);
-    updateOutboundGraphs(outbound);
+    const videoReports = await convertReportsToArray(videoSender);
+    const audioReports = await convertReportsToArray(audioSender);
+    const outboundVideo = await sampleOutboundVideoStats(videoReports);
+    const outboundAudio = await sampleOutboundAudioStats(audioReports);
+    updateOutboundVideoGraphs(outboundVideo);
+    updateOutboundAudioGraphs(outboundAudio);
   }, interval);
 }
 
-export function pollInboundStats(receiver, interval = 1000) {
+export function pollInboundStats(receivers, interval = 1000) {
   if (inboundReportsTimerId) return;
   setupInboundStatsGraphs();
 
+  const videoReceiver = receivers.find(sender => sender.track.kind === 'video');
+  const audioReceiver = receivers.find(sender => sender.track.kind === 'audio');
+
   inboundReportsTimerId = setInterval(async () => {
-    const inbound = await sampleInboundVideoStats(receiver);
-    updateInboundGraphs(inbound);
+    const videoReports = await convertReportsToArray(videoReceiver);
+    const audioReports = await convertReportsToArray(audioReceiver);
+    const inboundVideo = await sampleInboundVideoStats(videoReports);
+    const inboundAudio = await sampleInboundAudioStats(audioReports);
+    updateInboundVideoGraphs(inboundVideo);
+    updateInboundAudioGraphs(inboundAudio);
   }, interval);
 }
 
-function updateOutboundGraphs(outbound) {
+function updateOutboundVideoGraphs(outbound) {
   if (!outbound) return;
 
   for (const report of outbound) {
@@ -64,7 +106,19 @@ function updateOutboundGraphs(outbound) {
   }
 }
 
-function updateInboundGraphs(inbound) {
+function updateOutboundAudioGraphs(outbound) {
+  if (!outbound) return;
+
+  for (const report of outbound) {
+    remoteInboundAudioLossSeriesNoRid.addPoint(report.timestamp, report.fractionLost);
+    remoteInboundAudioLossGraph.setDataSeries([remoteInboundAudioLossSeriesNoRid]);
+    remoteInboundAudioLossGraph.updateEndDate();
+    remoteInboundAudioLossSamples.push(report.fractionLost);
+    setMinMaxAvg(remoteInboundAudioLossSamples, 'remote-inbound-audio-loss-minmax');
+  }
+}
+
+function updateInboundVideoGraphs(inbound) {
   if (!inbound) return;
 
   for (const report of inbound) {
@@ -76,19 +130,27 @@ function updateInboundGraphs(inbound) {
   }
 }
 
+function updateInboundAudioGraphs(inbound) {
+  if (!inbound) return;
+
+  for (const report of inbound) {
+    inboundAudioLossSeriesNoRid.addPoint(report.timestamp, report.fractionLost);
+    inboundAudioLossGraph.setDataSeries([inboundAudioLossSeriesNoRid]);
+    inboundAudioLossGraph.updateEndDate();
+    inboundAudioLossSamples.push(report.fractionLost);
+    setMinMaxAvg(inboundAudioLossSamples, 'inbound-audio-loss-minmax');
+  }
+}
+
 /**
  * Outbound Stats
  * https://www.w3.org/TR/webrtc-stats/#outboundrtpstats-dict*
  */
 const prevOutboundVideoReports = new Map();
+const prevOutboundAudioReports = new Map();
 
-/**
- * @param {RTCRtpSender} sender - RTC Sender Object
- */
-async function sampleOutboundVideoStats(sender) {
-  const rtcReports = await sender.getStats();
-  const reports = Array.from(rtcReports.values());
-  const videoReports = parseOutboundVideoReports(reports);
+async function sampleOutboundVideoStats(reports) {
+  const videoReports = parseOutboundReports(reports, 'video');
 
   const prevReports = videoReports.map((report) => {
     const prev = prevOutboundVideoReports.get(report.rid);
@@ -96,18 +158,26 @@ async function sampleOutboundVideoStats(sender) {
     return prev;
   });
 
-  return calculateWindowedVideoReports(videoReports, prevReports);
+  return calculateWindowedOutboundReports(videoReports, prevReports, 'video');
+}
+
+async function sampleOutboundAudioStats(reports) {
+  const audioReports = parseOutboundReports(reports, 'audio');
+
+  const prevReports = audioReports.map((report) => {
+    const prev = prevOutboundAudioReports.get(report.rid);
+    prevOutboundAudioReports.set(report.rid, report);
+    return prev;
+  });
+
+  return calculateWindowedOutboundReports(audioReports, prevReports, 'audio');
 }
 
 const prevInboundVideoReports = new Map();
+const prevInboundAudioReports = new Map();
 
-/**
- * @param {RTCRtpReceiver} receiver - RTC Sender Object
- */
-async function sampleInboundVideoStats(receiver) {
-  const rtcReports = await receiver.getStats();
-  const reports = Array.from(rtcReports.values());
-  const videoReports = parseInboundVideoReports(reports);
+async function sampleInboundVideoStats(reports) {
+  const videoReports = parseInboundReports(reports, 'video');
 
   const prevReports = videoReports.map((report) => {
     const prev = prevInboundVideoReports.get(report.rid);
@@ -115,39 +185,46 @@ async function sampleInboundVideoStats(receiver) {
     return prev;
   });
 
-  return calculateWindowedInboundVideoReports(videoReports, prevReports);
+  return calculateWindowedInboundReports(videoReports, prevReports, 'video');
 }
 
-function parseOutboundVideoReports(reports) {
+async function sampleInboundAudioStats(reports) {
+  const audioReports = parseInboundReports(reports, 'audio');
+
+  const prevReports = audioReports.map((report) => {
+    const prev = prevInboundAudioReports.get(report.rid);
+    prevInboundAudioReports.set(report.rid, report);
+    return prev;
+  });
+
+  return calculateWindowedInboundReports(audioReports, prevReports, 'audio');
+}
+
+function parseOutboundReports(reports, type = 'video') {
   const outboundRtp = reports
       .filter((report) => {
         const isRemote = report.isRemote ?? false;
         const kind = report.kind ?? null ? report.kind : 'none';
-        const isVideo = kind === 'video';
-        return report.type === 'outbound-rtp' && !isRemote && isVideo;
+        const isDesiredType = kind === type;
+        return report.type === 'outbound-rtp' && !isRemote && isDesiredType;
       })
       .reduce((result, untypedReport) => {
         /** @type {RTCOutboundRtpStreamStats} */
         const report = untypedReport;
         const encodeBitrateKbps = (8 * (report.bytesSent ?? 0)) / 1000;
-        const retransmittedKbps = (8 * (report.retransmittedBytesSent ?? 0)) / 1000;
 
         result[`${report.ssrc}`] = {
           local: true,
-          type: 'video',
+          type,
           timestamp: report.timestamp,
           sampleDurationMs: report.timestamp,
           rid: report.rid ?? 'no-rid',
           targetBitrateKbps: (report.targetBitrate ?? 0) / 1000,
           encodeBitrateKbps,
           encodeDurationMs: (report.totalEncodeTime ?? 0) * 1000,
-          hugeFramesSent: report.hugeFramesSent,
-          keyframesEncoded: report.keyFramesEncoded,
-          framesPerSecond: report.framesPerSecond,
-          width: report.frameWidth,
-          height: report.frameHeight,
-          percentBitrateRetransmitted: (retransmittedKbps / encodeBitrateKbps) * 100,
           nackCount: report.nackCount,
+          roundTripTime: 0,
+          fractionLost: 0,
         };
         return result;
       }, {});
@@ -156,8 +233,8 @@ function parseOutboundVideoReports(reports) {
       .filter((report) => {
         const isRemote = report.isRemote ?? false;
         const kind = report.kind ?? null ? report.kind : 'none';
-        const isVideo = kind === 'video';
-        return report.type === 'remote-inbound-rtp' && !isRemote && isVideo;
+        const isDesiredType = kind === type;
+        return report.type === 'remote-inbound-rtp' && !isRemote && isDesiredType;
       })
       .reduce((result, report) => {
         result[`${report.ssrc}`] = {
@@ -167,24 +244,24 @@ function parseOutboundVideoReports(reports) {
         return result;
       }, {});
 
-  const outboundVideoReports = [];
+  const outboundReports = [];
   for (const ssrc of Object.keys(outboundRtp)) {
-    outboundVideoReports.push({
+    outboundReports.push({
       ...outboundRtp[ssrc],
       ...remoteInboundRtp[ssrc],
     });
   }
 
-  return outboundVideoReports;
+  return outboundReports;
 }
 
-function parseInboundVideoReports(reports) {
+function parseInboundReports(reports, type = 'video') {
   const inboundRtp = reports
       .filter((report) => {
         const isRemote = report.isRemote ?? false;
         const kind = report.kind ?? null ? report.kind : 'none';
-        const isVideo = kind === 'video';
-        return report.type === 'inbound-rtp' && !isRemote && isVideo;
+        const isDesiredType = kind === type;
+        return report.type === 'inbound-rtp' && !isRemote && isDesiredType;
       })
       .reduce((result, untypedReport) => {
         /** @type {RTCInboundRtpStreamStats} */
@@ -222,9 +299,10 @@ function parseInboundVideoReports(reports) {
  *
  * @param {any[]} nextReports
  * @param {any[]} prevReports
+ * @param {string} type
  * @return {any}
  */
-function calculateWindowedVideoReports(nextReports, prevReports = []) {
+function calculateWindowedOutboundReports(nextReports, prevReports = [], type = 'video') {
   // Map and match next with previous report
   const windowedSamples = nextReports.map((nextReport) => {
     const prevReport = prevReports.find((prevReport) => prevReport?.rid === nextReport.rid);
@@ -243,17 +321,14 @@ function calculateWindowedVideoReports(nextReports, prevReports = []) {
       sampleDurationMs,
       encodeBitrateKbps,
       encodeDurationMs: nextReport.encodeDurationMs - prevReport.encodeDurationMs,
-      hugeFramesSent: nextReport.hugeFramesSent - prevReport.hugeFramesSent,
-      keyframesEncoded: nextReport.keyframesEncoded - prevReport.keyframesEncoded,
       nackCount: nextReport.nackCount - prevReport.nackCount,
-      pictureLossCount: nextReport.pictureLossCount - prevReport.pictureLossCount,
     };
   });
 
   return windowedSamples;
 }
 
-function calculateWindowedInboundVideoReports(nextReports, prevReports = []) {
+function calculateWindowedInboundReports(nextReports, prevReports = [], type = 'video') {
   // Map and match next with previous report
   const windowedSamples = nextReports.map((nextReport) => {
     const prevReport = prevReports.find((prevReport) => prevReport?.rid === nextReport.rid);
