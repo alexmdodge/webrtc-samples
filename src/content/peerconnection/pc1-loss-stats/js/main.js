@@ -94,6 +94,14 @@ async function call() {
 
   pc1.addEventListener('icecandidate', e => onIceCandidate(pc1, e));
   pc2 = new RTCPeerConnection(configuration);
+  // pc2 = new RTCPeerConnection({
+  //   iceTransportPolicy: 'relay',
+  //   iceServers: [{
+  //     urls: 'turn:<ADD_FROM_TOOL>?transport=udp',
+  //     username: '<ADD_FROM_TOOL>',
+  //     credential: '<ADD_FROM_TOOL>',
+  //   }]
+  // });
   console.log('Created remote peer connection object pc2');
 
   pc2.addEventListener('icecandidate', e => onIceCandidate(pc2, e));
