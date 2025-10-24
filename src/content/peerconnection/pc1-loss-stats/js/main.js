@@ -60,8 +60,16 @@ async function start() {
   console.log('Requesting local stream');
   startButton.disabled = true;
   try {
-    // const stream = await navigator.mediaDevices.getUserMedia({audio: true, video: true});
-    const stream = syntheticVideoStream();
+    // Use same constraints as SFU sample for consistency
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: {ideal: 1280},
+        height: {ideal: 720},
+        aspectRatio: {ideal: 16/9},
+        facingMode: {ideal: 'user'}
+      },
+      audio: true
+    });
     console.log('Received local stream');
     localVideo.srcObject = stream;
     localStream = stream;
@@ -127,6 +135,91 @@ function onCreateSessionDescriptionError(error) {
   console.log(`Failed to create session description: ${error.toString()}`);
 }
 
+function mungeOfferForSFU(sdp) {
+  const lines = sdp.split('\n');
+  const result = [];
+  let inVideoSection = false;
+
+  for (const line of lines) {
+    if (line.startsWith('m=video')) {
+      inVideoSection = true;
+      // Only keep VP8 and RTX in video line
+      result.push(line.replace(/UDP\/TLS\/RTP\/SAVPF.*/, 'UDP/TLS/RTP/SAVPF 96 97'));
+    } else if (line.startsWith('m=')) {
+      inVideoSection = false;
+      result.push(line);
+    } else if (inVideoSection && line.startsWith('a=extmap:')) {
+      // Only keep specific video extensions
+      if (line.includes('http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01') ||
+          line.includes('http://www.webrtc.org/experiments/rtp-hdrext/video-layers-allocation00') ||
+          line.includes('http://www.webrtc.org/experiments/rtp-hdrext/abs-capture-time') ||
+          line.includes('http://www.webrtc.org/experiments/rtp-hdrext/playout-delay')) {
+        result.push(line);
+      }
+    } else if (inVideoSection && line.startsWith('a=rtpmap:')) {
+      // Only keep VP8 and RTX
+      if (line.includes('VP8/90000') || line.includes('rtx/90000')) {
+        result.push(line);
+      }
+    } else if (inVideoSection && line.startsWith('a=fmtp:')) {
+      // Only keep RTX fmtp lines
+      if (line.includes('apt=96')) {
+        result.push(line);
+      }
+    } else if (inVideoSection && line.startsWith('a=rtcp-fb:')) {
+      // Keep VP8 feedback only
+      if (line.startsWith('a=rtcp-fb:96 ')) {
+        result.push(line);
+      }
+    } else {
+      result.push(line);
+    }
+  }
+
+  return result.join('\n');
+}
+
+function mungeAnswerForSFU(sdp) {
+  const lines = sdp.split('\n');
+  const result = [];
+  let inVideoSection = false;
+
+  for (const line of lines) {
+    if (line.startsWith('m=video')) {
+      inVideoSection = true;
+      // Only keep VP8 and RTX in video line
+      result.push(line.replace(/UDP\/TLS\/RTP\/SAVPF.*/, 'UDP/TLS/RTP/SAVPF 96 97'));
+    } else if (line.startsWith('m=')) {
+      inVideoSection = false;
+      result.push(line);
+    } else if (inVideoSection && line.startsWith('a=extmap:')) {
+      // Only keep transport-cc extension
+      if (line.includes('http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01')) {
+        result.push(line);
+      }
+    } else if (inVideoSection && line.startsWith('a=rtpmap:')) {
+      // Only keep VP8 and RTX
+      if (line.includes('VP8/90000') || line.includes('rtx/90000')) {
+        result.push(line);
+      }
+    } else if (inVideoSection && line.startsWith('a=fmtp:')) {
+      // Only keep RTX fmtp
+      if (line.includes('apt=')) {
+        result.push(line);
+      }
+    } else if (inVideoSection && line.startsWith('a=rtcp-fb:')) {
+      // Keep essential feedback
+      if (line.includes('transport-cc') || line.includes('nack') || line.includes('ccm fir') || line.includes('goog-remb')) {
+        result.push(line);
+      }
+    } else {
+      result.push(line);
+    }
+  }
+
+  return result.join('\n');
+}
+
 async function onCreateOfferSuccess(desc) {
   console.log(`Offer from pc1\n${desc.sdp}`);
   console.log('pc1 setLocalDescription start');
@@ -146,9 +239,6 @@ async function onCreateOfferSuccess(desc) {
   }
 
   console.log('pc2 createAnswer start');
-  // Since the 'remote' side has no media stream we need
-  // to pass in the right constraints in order for it to
-  // accept the incoming offer of audio and video.
   try {
     const answer = await pc2.createAnswer();
     await onCreateAnswerSuccess(answer);

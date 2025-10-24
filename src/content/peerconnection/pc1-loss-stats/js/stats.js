@@ -19,6 +19,14 @@ let inboundAudioLossSeriesNoRid;
 let inboundAudioLossGraph;
 let inboundAudioLossSamples = [];
 
+let availableOutgoingBitrateSeriesNoRid;
+let availableOutgoingBitrateGraph;
+let availableOutgoingBitrateSamples = [];
+
+let targetBitrateSeriesNoRid;
+let targetBitrateGraph;
+let targetBitrateSamples = [];
+
 function setupOutboundStatsGraphs() {
   remoteInboundVideoLossSamples = [];
   remoteInboundVideoLossSeriesNoRid = new TimelineDataSeries();
@@ -29,6 +37,16 @@ function setupOutboundStatsGraphs() {
   remoteInboundAudioLossSeriesNoRid = new TimelineDataSeries();
   remoteInboundAudioLossGraph = new TimelineGraphView('remote-inbound-audio-loss', 'remote-inbound-audio-loss-canvas');
   remoteInboundAudioLossGraph.updateEndDate();
+
+  availableOutgoingBitrateSamples = [];
+  availableOutgoingBitrateSeriesNoRid = new TimelineDataSeries();
+  availableOutgoingBitrateGraph = new TimelineGraphView('available-outgoing-bitrate', 'available-outgoing-bitrate-canvas');
+  availableOutgoingBitrateGraph.updateEndDate();
+
+  targetBitrateSamples = [];
+  targetBitrateSeriesNoRid = new TimelineDataSeries();
+  targetBitrateGraph = new TimelineGraphView('target-bitrate', 'target-bitrate-canvas');
+  targetBitrateGraph.updateEndDate();
 }
 
 function setupInboundStatsGraphs() {
@@ -72,8 +90,11 @@ export function pollOutboundStats(senders, interval = 1000) {
     const audioReports = await convertReportsToArray(audioSender);
     const outboundVideo = await sampleOutboundVideoStats(videoReports);
     const outboundAudio = await sampleOutboundAudioStats(audioReports);
+    const candidatePairStats = await sampleCandidatePairStats(videoReports);
     updateOutboundVideoGraphs(outboundVideo);
     updateOutboundAudioGraphs(outboundAudio);
+    updateBandwidthGraphs(candidatePairStats);
+    updateTargetBitrateGraphs(outboundVideo);
   }, interval);
 }
 
@@ -115,6 +136,35 @@ function updateOutboundAudioGraphs(outbound) {
     remoteInboundAudioLossGraph.updateEndDate();
     remoteInboundAudioLossSamples.push(report.fractionLost);
     setMinMaxAvg(remoteInboundAudioLossSamples, 'remote-inbound-audio-loss-minmax');
+  }
+}
+
+function updateBandwidthGraphs(candidatePairStats) {
+  if (!candidatePairStats) return;
+
+  for (const report of candidatePairStats) {
+    if (report.availableOutgoingBitrate !== undefined) {
+      const bitrateKbps = report.availableOutgoingBitrate / 1000;
+      availableOutgoingBitrateSeriesNoRid.addPoint(report.timestamp, bitrateKbps);
+      availableOutgoingBitrateGraph.setDataSeries([availableOutgoingBitrateSeriesNoRid]);
+      availableOutgoingBitrateGraph.updateEndDate();
+      availableOutgoingBitrateSamples.push(bitrateKbps);
+      setMinMaxAvg(availableOutgoingBitrateSamples, 'available-outgoing-bitrate-minmax');
+    }
+  }
+}
+
+function updateTargetBitrateGraphs(outbound) {
+  if (!outbound) return;
+
+  for (const report of outbound) {
+    if (report.targetBitrateKbps !== undefined) {
+      targetBitrateSeriesNoRid.addPoint(report.timestamp, report.targetBitrateKbps);
+      targetBitrateGraph.setDataSeries([targetBitrateSeriesNoRid]);
+      targetBitrateGraph.updateEndDate();
+      targetBitrateSamples.push(report.targetBitrateKbps);
+      setMinMaxAvg(targetBitrateSamples, 'target-bitrate-minmax');
+    }
   }
 }
 
@@ -171,6 +221,15 @@ async function sampleOutboundAudioStats(reports) {
   });
 
   return calculateWindowedOutboundReports(audioReports, prevReports, 'audio');
+}
+
+async function sampleCandidatePairStats(reports) {
+  const candidatePairReports = reports.filter(report => report.type === 'candidate-pair' && report.nominated);
+  
+  return candidatePairReports.map(report => ({
+    timestamp: report.timestamp,
+    availableOutgoingBitrate: report.availableOutgoingBitrate
+  }));
 }
 
 const prevInboundVideoReports = new Map();
