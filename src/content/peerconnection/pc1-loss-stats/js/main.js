@@ -1,3 +1,4 @@
+/* eslint-disable object-curly-spacing */
 /*
  *  Copyright (c) 2015 The WebRTC project authors. All Rights Reserved.
  *
@@ -56,6 +57,57 @@ function getOtherPc(pc) {
   return (pc === pc1) ? pc2 : pc1;
 }
 
+/**
+ * @param {RTCPeerConnection} pc Peer connection to retrieve transceiver from
+ */
+function forceH264Preferences(pc) {
+  /** @type {RTCRtpCodec[]} */
+  const codecs = RTCRtpReceiver.getCapabilities('video')?.codecs ?? [];
+  const h264Codecs = codecs.filter(c => c.mimeType === 'video/H264');
+
+  if (h264Codecs.length === 0) {
+    console.warn('&&& Browser does not support H264 skipping codec force', codecs);
+    return;
+  }
+
+  /** @type {RTCRtpTransceiver[]} */
+  const transceiver = pc.getTransceivers().find((tx) => tx.receiver.track.kind === 'video');
+
+  if (!transceiver) {
+    console.error('No transceiver');
+    return;
+  }
+
+  transceiver.setCodecPreferences(h264Codecs);
+  console.log('&&& Forcing h264: ', h264Codecs);
+}
+
+/**
+ * @param {RTCPeerConnection} pc
+ * @param {RTCRtpEncodingParameters[]} encodings
+ */
+async function updateEncodings(pc, encodings = []) {
+  /** @type {RTCRtpTransceiver[]} */
+  const transceivers = pc.getTransceivers();
+  const videoTransceiver = transceivers.find((ts) => ts.mid === '1');
+
+  if (!videoTransceiver) {
+    console.error('No video Transceiver found');
+    return;
+  }
+
+  const params = videoTransceiver?.sender.getParameters();
+  params.encodings = params.encodings.map((encoding) => {
+    const rid = encoding.rid ?? 'none';
+
+    const encodingOverride = encodings.find(enc => enc.rid === rid) ?? encodings[0] ?? {};
+    return { ...encoding, ...encodingOverride };
+  });
+
+  await videoTransceiver.sender.setParameters(params);
+  console.log('&&& Current Encodings: ', params);
+}
+
 async function start() {
   console.log('Requesting local stream');
   startButton.disabled = true;
@@ -63,10 +115,10 @@ async function start() {
     // Use same constraints as SFU sample for consistency
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
-        width: {ideal: 1280},
-        height: {ideal: 720},
-        aspectRatio: {ideal: 16/9},
-        facingMode: {ideal: 'user'}
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        aspectRatio: { ideal: 16 / 9 },
+        facingMode: { ideal: 'user' }
       },
       audio: true
     });
@@ -114,6 +166,16 @@ async function call() {
 
   pc2.addEventListener('icecandidate', e => onIceCandidate(pc2, e));
   pc1.addEventListener('iceconnectionstatechange', e => onIceStateChange(pc1, e));
+
+  pc1.addEventListener('connectionstatechange', async e => {
+    console.log('&&& State changed: ', pc1.connectionState);
+    if (pc1.connectionState === 'connected') {
+      await updateEncodings(pc1, [{
+        maxBitrate: 2500000,
+      }]);
+    }
+  });
+
   pc2.addEventListener('iceconnectionstatechange', e => onIceStateChange(pc2, e));
   pc2.addEventListener('track', gotRemoteStream);
 
@@ -124,6 +186,7 @@ async function call() {
 
   try {
     console.log('pc1 createOffer start');
+    // forceH264Preferences(pc1);
     const offer = await pc1.createOffer(offerOptions);
     await onCreateOfferSuccess(offer);
   } catch (e) {
@@ -133,91 +196,6 @@ async function call() {
 
 function onCreateSessionDescriptionError(error) {
   console.log(`Failed to create session description: ${error.toString()}`);
-}
-
-function mungeOfferForSFU(sdp) {
-  const lines = sdp.split('\n');
-  const result = [];
-  let inVideoSection = false;
-
-  for (const line of lines) {
-    if (line.startsWith('m=video')) {
-      inVideoSection = true;
-      // Only keep VP8 and RTX in video line
-      result.push(line.replace(/UDP\/TLS\/RTP\/SAVPF.*/, 'UDP/TLS/RTP/SAVPF 96 97'));
-    } else if (line.startsWith('m=')) {
-      inVideoSection = false;
-      result.push(line);
-    } else if (inVideoSection && line.startsWith('a=extmap:')) {
-      // Only keep specific video extensions
-      if (line.includes('http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01') ||
-          line.includes('http://www.webrtc.org/experiments/rtp-hdrext/video-layers-allocation00') ||
-          line.includes('http://www.webrtc.org/experiments/rtp-hdrext/abs-capture-time') ||
-          line.includes('http://www.webrtc.org/experiments/rtp-hdrext/playout-delay')) {
-        result.push(line);
-      }
-    } else if (inVideoSection && line.startsWith('a=rtpmap:')) {
-      // Only keep VP8 and RTX
-      if (line.includes('VP8/90000') || line.includes('rtx/90000')) {
-        result.push(line);
-      }
-    } else if (inVideoSection && line.startsWith('a=fmtp:')) {
-      // Only keep RTX fmtp lines
-      if (line.includes('apt=96')) {
-        result.push(line);
-      }
-    } else if (inVideoSection && line.startsWith('a=rtcp-fb:')) {
-      // Keep VP8 feedback only
-      if (line.startsWith('a=rtcp-fb:96 ')) {
-        result.push(line);
-      }
-    } else {
-      result.push(line);
-    }
-  }
-
-  return result.join('\n');
-}
-
-function mungeAnswerForSFU(sdp) {
-  const lines = sdp.split('\n');
-  const result = [];
-  let inVideoSection = false;
-
-  for (const line of lines) {
-    if (line.startsWith('m=video')) {
-      inVideoSection = true;
-      // Only keep VP8 and RTX in video line
-      result.push(line.replace(/UDP\/TLS\/RTP\/SAVPF.*/, 'UDP/TLS/RTP/SAVPF 96 97'));
-    } else if (line.startsWith('m=')) {
-      inVideoSection = false;
-      result.push(line);
-    } else if (inVideoSection && line.startsWith('a=extmap:')) {
-      // Only keep transport-cc extension
-      if (line.includes('http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01')) {
-        result.push(line);
-      }
-    } else if (inVideoSection && line.startsWith('a=rtpmap:')) {
-      // Only keep VP8 and RTX
-      if (line.includes('VP8/90000') || line.includes('rtx/90000')) {
-        result.push(line);
-      }
-    } else if (inVideoSection && line.startsWith('a=fmtp:')) {
-      // Only keep RTX fmtp
-      if (line.includes('apt=')) {
-        result.push(line);
-      }
-    } else if (inVideoSection && line.startsWith('a=rtcp-fb:')) {
-      // Keep essential feedback
-      if (line.includes('transport-cc') || line.includes('nack') || line.includes('ccm fir') || line.includes('goog-remb')) {
-        result.push(line);
-      }
-    } else {
-      result.push(line);
-    }
-  }
-
-  return result.join('\n');
 }
 
 async function onCreateOfferSuccess(desc) {
@@ -320,88 +298,4 @@ function hangup() {
   pc2 = null;
   hangupButton.disabled = true;
   callButton.disabled = false;
-}
-
-// Return a number between 0 and maxValue based on the input number,
-// so that the output changes smoothly up and down.
-function triangle(number, maxValue) {
-  const modulus = (maxValue + 1) * 2;
-  return Math.abs(number % modulus - maxValue);
-}
-
-function syntheticVideoStream({width = 1280, height = 720, signal} = {}) {
-  const canvas = Object.assign(
-      document.createElement('canvas'), {width, height}
-  );
-  const ctx = canvas.getContext('2d');
-  const stream = canvas.captureStream();
-
-  // **Audio Context and Oscillator Setup**
-  const audioCtx = new AudioContext();
-  const oscillator = audioCtx.createOscillator();
-  const gainNode = audioCtx.createGain(); // Use a gain node to control volume
-
-  oscillator.type = 'sine'; // You can change the waveform type
-  oscillator.frequency.value = 220; // Base frequency
-
-  // Connect oscillator to gain node, and gain node to audio context destination
-  oscillator.connect(gainNode);
-  gainNode.connect(audioCtx.destination);
-
-  // Start the oscillator
-  oscillator.start();
-
-  // Vibrato effect (pitch oscillation) using a modulator oscillator
-  const modulator = audioCtx.createOscillator();
-  const modulatorGain = audioCtx.createGain();
-
-  modulator.frequency.value = 5; // Oscillation speed (Hz)
-  modulatorGain.gain.value = 10; // Oscillation depth (in Hz)
-
-  modulator.connect(modulatorGain);
-  modulatorGain.connect(oscillator.frequency); // Connect to oscillator's frequency
-
-  modulator.start();
-
-  // Create a MediaStreamAudioDestinationNode
-  const destination = audioCtx.createMediaStreamDestination();
-  gainNode.connect(destination); // Connect gain node to the destination
-
-  const audioStream = destination.stream; // Get the audio stream
-
-  // Combine the video and audio streams
-  const combinedStream = new MediaStream([...stream.getVideoTracks(), ...audioStream.getAudioTracks()]);
-
-  let count = 0;
-  setInterval(() => {
-    // Use relatively-prime multipliers to get a color roll
-    const r = triangle(count*2, 255);
-    const g = triangle(count*3, 255);
-    const b = triangle(count*5, 255);
-    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-    count += 1;
-    const boxSize=80;
-    ctx.fillRect(0, 0, width, height);
-    // Add some bouncing boxes in contrast color to add a little more noise.
-    const rContrast = (r + 128)%256;
-    const gContrast = (g + 128)%256;
-    const bContrast = (b + 128)%256;
-    ctx.fillStyle = `rgb(${rContrast}, ${gContrast}, ${bContrast})`;
-    const xpos = triangle(count*5, width - boxSize);
-    const ypos = triangle(count*7, height - boxSize);
-    ctx.fillRect(xpos, ypos, boxSize, boxSize);
-    const xpos2 = triangle(count*11, width - boxSize);
-    const ypos2 = triangle(count*13, height - boxSize);
-    ctx.fillRect(xpos2, ypos2, boxSize, boxSize);
-    // If signal is set (0-255), add a constant-color box of that luminance to
-    // the video frame at coordinates 20 to 60 in both X and Y direction.
-    // (big enough to avoid color bleed from surrounding video in some codecs,
-    // for more stable tests).
-    if (signal != undefined) {
-      ctx.fillStyle = `rgb(${signal}, ${signal}, ${signal})`;
-      ctx.fillRect(20, 20, 40, 40);
-    }
-  }, 10);
-
-  return combinedStream;
 }
