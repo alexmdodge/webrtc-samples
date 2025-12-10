@@ -1,3 +1,4 @@
+/* eslint-disable space-before-function-paren */
 /* eslint-disable object-curly-spacing */
 /*
  *  Copyright (c) 2015 The WebRTC project authors. All Rights Reserved.
@@ -7,7 +8,7 @@
  *  tree.
  */
 
-import {pollOutboundStats, pollInboundStats, clearStatsPolling} from './stats.js';
+import { pollOutboundStats, pollInboundStats, clearStatsPolling } from './stats.js';
 
 const startButton = document.getElementById('startButton');
 const callButton = document.getElementById('callButton');
@@ -22,11 +23,11 @@ let startTime;
 const localVideo = document.getElementById('localVideo');
 const remoteVideo = document.getElementById('remoteVideo');
 
-localVideo.addEventListener('loadedmetadata', function() {
+localVideo.addEventListener('loadedmetadata', function () {
   console.log(`Local video videoWidth: ${this.videoWidth}px,  videoHeight: ${this.videoHeight}px`);
 });
 
-remoteVideo.addEventListener('loadedmetadata', function() {
+remoteVideo.addEventListener('loadedmetadata', function () {
   console.log(`Remote video videoWidth: ${this.videoWidth}px,  videoHeight: ${this.videoHeight}px`);
 });
 
@@ -57,29 +58,23 @@ function getOtherPc(pc) {
   return (pc === pc1) ? pc2 : pc1;
 }
 
-/**
- * @param {RTCPeerConnection} pc Peer connection to retrieve transceiver from
- */
-function forceH264Preferences(pc) {
-  /** @type {RTCRtpCodec[]} */
-  const codecs = RTCRtpReceiver.getCapabilities('video')?.codecs ?? [];
-  const h264Codecs = codecs.filter(c => c.mimeType === 'video/H264');
+function mungeAnswerSdp(sdp) {
+  const parsed = window.SDPTransform.parse(sdp);
 
-  if (h264Codecs.length === 0) {
-    console.warn('&&& Browser does not support H264 skipping codec force', codecs);
-    return;
+  console.log('&&& Parsed is: ', parsed);
+  for (const media of parsed.media) {
+    if (media.type !== 'audio') {
+      continue;
+    }
+
+    // debugger;
+    // media.fmtp = media.fmtp.filter(fmtp => fmtp.payload !== 63);
+    // media.rtp = media.rtp.filter(rtp => rtp.codec === 'opus');
+    media.ext = media.ext.filter(ext => !ext.uri.includes('transport-wide-cc-extensions-01'));
+    // media.rtcpFb = media.rtcpFb.filter(fb => !fb.type === 'transport-cc');
   }
 
-  /** @type {RTCRtpTransceiver[]} */
-  const transceiver = pc.getTransceivers().find((tx) => tx.receiver.track.kind === 'video');
-
-  if (!transceiver) {
-    console.error('No transceiver');
-    return;
-  }
-
-  transceiver.setCodecPreferences(h264Codecs);
-  console.log('&&& Forcing h264: ', h264Codecs);
+  return window.SDPTransform.write(parsed);
 }
 
 /**
@@ -186,7 +181,6 @@ async function call() {
 
   try {
     console.log('pc1 createOffer start');
-    // forceH264Preferences(pc1);
     const offer = await pc1.createOffer(offerOptions);
     await onCreateOfferSuccess(offer);
   } catch (e) {
@@ -238,6 +232,17 @@ function onSetSessionDescriptionError(error) {
 }
 
 function gotRemoteStream(e) {
+  // Set codec preferences on the receiving side.
+  // if (e.track.kind === 'video') {
+  //   const codecs = RTCRtpReceiver.getCapabilities('video')?.codecs ?? [];
+  //   const h264Codecs = codecs?.filter(c => c.mimeType === 'video/H264');
+
+  //   if (h264Codecs.length > 0) {
+  //     e.transceiver.setCodecPreferences(h264Codecs);
+  //     console.log('Receiver\'s preferred video codec', h264Codecs);
+  //   }
+  // }
+
   pollInboundStats(pc2.getReceivers());
 
   if (remoteVideo.srcObject !== e.streams[0]) {
@@ -247,6 +252,7 @@ function gotRemoteStream(e) {
 }
 
 async function onCreateAnswerSuccess(desc) {
+  desc.sdp = mungeAnswerSdp(desc.sdp);
   console.log(`Answer from pc2:\n${desc.sdp}`);
   console.log('pc2 setLocalDescription start');
   try {

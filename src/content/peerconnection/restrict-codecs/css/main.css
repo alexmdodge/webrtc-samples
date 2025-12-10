@@ -1,0 +1,31 @@
+body {
+  font-family: 'Roboto', sans-serif;
+  margin: 0;
+  padding: 1em;
+  word-break: break-word;
+}
+
+#container {
+  margin: 0 auto;
+  max-width: 60em;
+}
+
+video {
+  background: #222;
+  margin: 0 0 20px 0;
+  width: 45%;
+}
+
+button {
+  margin: 0 20px 25px 0;
+  width: 83px;
+}
+
+select {
+  margin: 0 1em 1em 0;
+}
+
+#activeCodec {
+  margin-top: 1em;
+  font-weight: bold;
+}
