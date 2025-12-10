@@ -1,9 +1,11 @@
+/* eslint-disable prefer-const */
 'use strict';
 
 const startButton = document.getElementById('startButton');
 const callButton = document.getElementById('callButton');
 const hangupButton = document.getElementById('hangupButton');
 const codecPreferences = document.getElementById('codecPreferences');
+const codecLevelPreferences = document.getElementById('codecLevelPreferences');
 const activeCodecDiv = document.getElementById('activeCodec');
 
 callButton.disabled = true;
@@ -12,6 +14,7 @@ hangupButton.disabled = true;
 startButton.addEventListener('click', start);
 callButton.addEventListener('click', call);
 hangupButton.addEventListener('click', hangup);
+codecPreferences.addEventListener('change', populateCodecLevelDropdown);
 
 let startTime;
 let localVideo = document.getElementById('localVideo');
@@ -34,9 +37,9 @@ const supportsSetCodecPreferences = window.RTCRtpTransceiver &&
 
 function populateCodecDropdown() {
   if (!supportsSetCodecPreferences) return;
-  
+
   const {codecs} = RTCRtpReceiver.getCapabilities('video');
-  
+
   Object.entries(CODEC_GROUPS).forEach(([groupName, mimeType]) => {
     const groupCodecs = codecs.filter(c => c.mimeType === mimeType);
     if (groupCodecs.length > 0) {
@@ -47,6 +50,42 @@ function populateCodecDropdown() {
     }
   });
   codecPreferences.disabled = false;
+}
+
+function populateCodecLevelDropdown() {
+  codecLevelPreferences.innerHTML = '<option value="">No preference</option>';
+
+  if (!supportsSetCodecPreferences || !codecPreferences.value) {
+    codecLevelPreferences.disabled = true;
+    return;
+  }
+
+  const {codecs} = RTCRtpReceiver.getCapabilities('video');
+  const selectedMimeType = codecPreferences.value;
+  const profileLevelIds = new Set();
+
+  // Group codecs by profile-level-id
+  codecs.forEach(codec => {
+    if (codec.mimeType === selectedMimeType &&
+        !['video/red', 'video/ulpfec', 'video/rtx', 'video/flexfec-03'].includes(codec.mimeType)) {
+
+      const profileLevelId = extractProfileLevelId(codec.sdpFmtpLine);
+      if (profileLevelId && !profileLevelIds.has(profileLevelId)) {
+        profileLevelIds.add(profileLevelId);
+        const option = document.createElement('option');
+        option.value = (codec.mimeType + ' ' + (codec.sdpFmtpLine || '')).trim();
+        option.innerText = `Profile Level: ${profileLevelId}`;
+        codecLevelPreferences.appendChild(option);
+      } else if (!profileLevelId) {
+        // Handle codecs without profile-level-id
+        const option = document.createElement('option');
+        option.value = (codec.mimeType + ' ' + (codec.sdpFmtpLine || '')).trim();
+        option.innerText = codec.sdpFmtpLine || 'Default';
+        codecLevelPreferences.appendChild(option);
+      }
+    }
+  });
+  codecLevelPreferences.disabled = false;
 }
 
 async function start() {
@@ -69,13 +108,13 @@ async function call() {
   hangupButton.disabled = false;
   console.log('Starting call');
   startTime = window.performance.now();
-  
+
   const configuration = {};
   console.log('RTCPeerConnection configuration:', configuration);
   pc1 = new RTCPeerConnection(configuration);
   console.log('Created local peer connection object pc1');
   pc1.addEventListener('icecandidate', e => onIceCandidate(pc1, e));
-  
+
   pc2 = new RTCPeerConnection(configuration);
   console.log('Created remote peer connection object pc2');
   pc2.addEventListener('icecandidate', e => onIceCandidate(pc2, e));
@@ -85,6 +124,8 @@ async function call() {
     pc1.addTrack(track, localStream);
   });
   console.log('Added local stream to pc1');
+  codecPreferences.disabled = true;
+  codecLevelPreferences.disabled = true;
 
   try {
     console.log('pc1 createOffer start');
@@ -146,21 +187,58 @@ function gotRemoteStream(e) {
 
   if (e.track.kind === 'video' && supportsSetCodecPreferences) {
     const preferredGroup = codecPreferences.options[codecPreferences.selectedIndex];
+    const preferredLevel = codecLevelPreferences.options[codecLevelPreferences.selectedIndex];
+
     if (preferredGroup.value !== '') {
       const {codecs} = RTCRtpReceiver.getCapabilities('video');
-      const filteredCodecs = codecs.filter(codec => {
-        if (['video/red', 'video/ulpfec', 'video/rtx', 'video/flexfec-03'].includes(codec.mimeType)) {
-          return false;
+      let filteredCodecs;
+
+      if (preferredLevel.value !== '' && preferredLevel.value !== preferredGroup.value) {
+        // Specific codec level selected - filter by profile-level-id
+        const [mimeType, sdpFmtpLine] = preferredLevel.value.split(' ');
+        const profileLevelId = extractProfileLevelId(sdpFmtpLine);
+
+        if (profileLevelId) {
+          filteredCodecs = codecs.filter(codec => {
+            if (codec.mimeType !== mimeType) return false;
+            if (['video/red', 'video/ulpfec', 'video/rtx', 'video/flexfec-03'].includes(codec.mimeType)) return false;
+
+            const codecProfileLevelId = extractProfileLevelId(codec.sdpFmtpLine);
+            return codecProfileLevelId === profileLevelId;
+          });
+          console.log(`Restricted to profile-level-id: ${profileLevelId} (both packetization modes)`);
+        } else {
+          // Fallback to exact match if no profile-level-id found
+          const selectedCodecIndex = codecs.findIndex(c =>
+            c.mimeType === mimeType && c.sdpFmtpLine === sdpFmtpLine
+          );
+          if (selectedCodecIndex !== -1) {
+            filteredCodecs = [codecs[selectedCodecIndex]];
+            console.log(`Restricted to exact codec: ${mimeType} ${sdpFmtpLine || ''}`);
+          }
         }
-        return codec.mimeType === preferredGroup.value;
-      });
-      
-      if (filteredCodecs.length > 0) {
-        e.transceiver.setCodecPreferences(filteredCodecs);
+      } else {
+        // Codec group selected
+        filteredCodecs = codecs.filter(codec => {
+          if (['video/red', 'video/ulpfec', 'video/rtx', 'video/flexfec-03'].includes(codec.mimeType)) {
+            return false;
+          }
+          return codec.mimeType === preferredGroup.value;
+        });
         console.log(`Restricted to codec group: ${preferredGroup.innerText}`);
+      }
+
+      if (filteredCodecs && filteredCodecs.length > 0) {
+        e.transceiver.setCodecPreferences(filteredCodecs);
       }
     }
   }
+}
+
+function extractProfileLevelId(sdpFmtpLine) {
+  if (!sdpFmtpLine) return null;
+  const match = sdpFmtpLine.match(/profile-level-id=([^;]+)/);
+  return match ? match[1] : null;
 }
 
 async function onCreateAnswerSuccess(desc) {
@@ -215,10 +293,12 @@ function hangup() {
   pc2 = null;
   hangupButton.disabled = true;
   callButton.disabled = false;
+  codecPreferences.disabled = false;
+  codecLevelPreferences.disabled = false;
   activeCodecDiv.textContent = '';
 }
 
-// Monitor active codec
+// Monitor active codec with detailed information
 setInterval(async () => {
   if (pc2 && pc2.connectionState === 'connected') {
     const stats = await pc2.getStats();
@@ -226,7 +306,18 @@ setInterval(async () => {
       if (report.type === 'inbound-rtp' && report.kind === 'video') {
         const codecStats = [...stats.values()].find(s => s.type === 'codec' && s.id === report.codecId);
         if (codecStats) {
-          activeCodecDiv.textContent = `Active codec: ${codecStats.mimeType}`;
+          let codecInfo = `Active codec: ${codecStats.mimeType}`;
+          if (codecStats.sdpFmtpLine) {
+            const profileLevelId = extractProfileLevelId(codecStats.sdpFmtpLine);
+            if (profileLevelId) {
+              codecInfo += ` (Profile Level: ${profileLevelId})`;
+            }
+            codecInfo += ` ${codecStats.sdpFmtpLine}`;
+          }
+          if (codecStats.payloadType) {
+            codecInfo += `, payloadType=${codecStats.payloadType}`;
+          }
+          activeCodecDiv.textContent = codecInfo;
         }
       }
     });

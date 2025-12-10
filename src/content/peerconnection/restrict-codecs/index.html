@@ -4,17 +4,27 @@
   <meta charset="utf-8">
   <meta name="description" content="WebRTC codec group restriction">
   <meta name="viewport" content="width=device-width, user-scalable=yes, initial-scale=1, maximum-scale=1">
-  <title>Restrict codecs by group</title>
+  <title>Restrict Codecs</title>
+
+  <link href="https://fonts.googleapis.com/css?family=Roboto:300,400,500,700" rel="stylesheet" type="text/css">
+  <link rel="stylesheet" href="../../../css/main.css"/>
   <link rel="stylesheet" href="css/main.css" />
 </head>
 
 <body>
   <div id="container">
-    <h1>Restrict codecs by group</h1>
+    <h1>Restrict Codecs</h1>
 
     <div>
       <label for="codecPreferences">Codec group:</label>
       <select id="codecPreferences" disabled>
+        <option value="">No preference</option>
+      </select>
+    </div>
+
+    <div>
+      <label for="codecLevelPreferences">Codec level:</label>
+      <select id="codecLevelPreferences" disabled>
         <option value="">No preference</option>
       </select>
     </div>
