@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<!--
+ *  Copyright (c) 2024 The WebRTC project authors. All Rights Reserved.
+ *
+ *  Use of this source code is governed by a BSD-style license
+ *  that can be found in the LICENSE file in the root of the source
+ *  tree.
+-->
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="description" content="Reproduce Chrome 152 maxBitrate: 0 RangeError with simulcast">
+    <meta name="viewport" content="width=device-width, user-scalable=yes, initial-scale=1, maximum-scale=1">
+    <title>Simulcast maxBitrate: 0 Reproduction</title>
+    <link rel="stylesheet" href="../../../css/main.css"/>
+    <style>
+        .log { font-family: monospace; font-size: 13px; white-space: pre-wrap; background: #f5f5f5; padding: 12px; border-radius: 4px; max-height: 400px; overflow-y: auto; }
+        .error { color: #d32f2f; font-weight: bold; }
+        .success { color: #388e3c; font-weight: bold; }
+        .info { color: #1565c0; }
+        button { margin: 4px; padding: 8px 16px; }
+        #controls { margin: 16px 0; }
+    </style>
+</head>
+
+<body>
+<div id="container">
+    <h1><a href="//webrtc.github.io/samples/" title="WebRTC samples homepage">WebRTC samples</a>
+        <span>Simulcast maxBitrate: 0 (Chrome 152+ Bug)</span></h1>
+
+    <p>Demonstrates <strong>Chrome Beta 152+</strong> rejecting <code>maxBitrate: 0</code> on
+        <code>addTransceiver()</code> with a <code>RangeError</code>. This reproduces the issue where
+        simulcast configurations with fewer than 3 layers pass inactive layers with
+        <code>maxBitrate: 0</code> in <code>sendEncodings</code>.</p>
+
+    <div id="controls">
+        <button id="btnBroken">Trigger Range Error (maxBitrate: 0)</button>
+        <button id="btnFixed">No Range Error (maxBitrate: undefined)</button>
+        <button id="btnClear">Clear Log</button>
+    </div>
+
+    <h3>Browser: <span id="browserInfo"></span></h3>
+
+    <div id="log" class="log"></div>
+</div>
+
+<script>
+'use strict';
+
+const logEl = document.getElementById('log');
+const browserInfoEl = document.getElementById('browserInfo');
+
+browserInfoEl.textContent = navigator.userAgent.match(/Chrome\/[\d.]+/)?.[0] ?? navigator.userAgent;
+
+function log(msg, className = '') {
+    const line = document.createElement('div');
+    line.className = className;
+    line.textContent = `[${new Date().toISOString().slice(11, 23)}] ${msg}`;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+}
+
+/**
+ * Minimal simulcast configuration that triggers the Chrome 152 bug.
+ *
+ * When a user configures fewer than 3 simulcast layers, inactive layers
+ * get maxBitrate: 0. Chrome 152+ rejects this with:
+ * "RangeError: Failed to execute 'addTransceiver' on RTCPeerConnection:
+ *  maxBitrate must be greater than 0"
+ */
+async function runTest(useFix) {
+    log('--- Starting test ---', 'info');
+    log(`Mode: ${useFix ? 'FIXED (omit maxBitrate for inactive)' : 'BROKEN (maxBitrate: 0)'}`, 'info');
+
+    // Simulate a 1-layer custom video config (only "hi" is active)
+    // This is what the IVS SDK produces for a single-layer simulcast config
+    const brokenEncodings = [
+        { rid: 'low', active: false, scaleResolutionDownBy: 4, /*maxBitrate: 0,*/ maxFramerate: 0 },
+        { rid: 'mid', active: false, scaleResolutionDownBy: 2, /*maxBitrate: 0,*/ maxFramerate: 0 },
+        { rid: 'hi',  active: true,  scaleResolutionDownBy: 1, maxBitrate: 2500000, maxFramerate: 30 },
+    ];
+
+    const fixedEncodings = [
+        { rid: 'low', active: false, scaleResolutionDownBy: 4 },
+        { rid: 'mid', active: false, scaleResolutionDownBy: 2 },
+        { rid: 'hi',  active: true,  scaleResolutionDownBy: 1, maxBitrate: 2500000, maxFramerate: 30 },
+    ];
+
+    const encodings = useFix ? fixedEncodings : brokenEncodings;
+    log(`sendEncodings: ${JSON.stringify(encodings, null, 2)}`);
+
+    let pc;
+    try {
+        // Get a video track
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        const videoTrack = stream.getVideoTracks()[0];
+        log(`Got video track: ${videoTrack.label} (${videoTrack.getSettings().width}x${videoTrack.getSettings().height})`);
+
+        // Create peer connection and add transceiver with simulcast encodings
+        pc = new RTCPeerConnection();
+        log('Created RTCPeerConnection');
+
+        const transceiver = pc.addTransceiver(videoTrack, {
+            direction: 'sendrecv',
+            streams: [stream],
+            sendEncodings: encodings,
+        });
+
+        log('addTransceiver() succeeded!', 'success');
+        log(`Transceiver direction: ${transceiver.direction}`);
+        log(`Sender encodings: ${JSON.stringify(transceiver.sender.getParameters().encodings)}`);
+
+        // Create offer to verify full negotiation works
+        const offer = await pc.createOffer();
+        log(`createOffer() succeeded (SDP length: ${offer.sdp.length})`, 'success');
+
+        // Cleanup
+        videoTrack.stop();
+        pc.close();
+        log('Test PASSED', 'success');
+    } catch (error) {
+        log(`ERROR: ${error.name}: ${error.message}`, 'error');
+        if (error instanceof RangeError) {
+            log('Test FAILED', 'error');
+        }
+        if (pc) {
+            pc.close();
+        }
+    }
+    log('');
+}
+
+document.getElementById('btnBroken').addEventListener('click', () => runTest(false));
+document.getElementById('btnFixed').addEventListener('click', () => runTest(true));
+document.getElementById('btnClear').addEventListener('click', () => { logEl.innerHTML = ''; });
+</script>
+</body>
+</html>
