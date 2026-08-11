@@ -75,8 +75,8 @@ async function runTest(useFix) {
     // Simulate a 1-layer custom video config (only "hi" is active)
     // This is what the IVS SDK produces for a single-layer simulcast config
     const brokenEncodings = [
-        { rid: 'low', active: false, scaleResolutionDownBy: 4, /*maxBitrate: 0,*/ maxFramerate: 0 },
-        { rid: 'mid', active: false, scaleResolutionDownBy: 2, /*maxBitrate: 0,*/ maxFramerate: 0 },
+        { rid: 'low', active: false, scaleResolutionDownBy: 4, maxBitrate: 0, maxFramerate: 0 },
+        { rid: 'mid', active: false, scaleResolutionDownBy: 2, maxBitrate: 0, maxFramerate: 0 },
         { rid: 'hi',  active: true,  scaleResolutionDownBy: 1, maxBitrate: 2500000, maxFramerate: 30 },
     ];
 
